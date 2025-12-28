@@ -95,6 +95,7 @@
       return Math.max(lo, Math.min(hi, x));
     }
 
+    // Estimate-only solver that lets Greeks drift as price moves.
     function solveMoveWithGreekDrift({
       optionPrice,
       targetPrice,
@@ -118,6 +119,7 @@
 
         for (let i = 0; i < steps; i++) {
           price += d * step + 0.5 * g * step * step + th * dt;
+
           d = clamp(d + g * step, -1, 1);
 
           const shape = Math.max(0.01, Math.abs(d) * (1 - Math.abs(d)));
@@ -125,9 +127,11 @@
 
           th = theta0 * (g / gamma0);
         }
+
         return { price, delta: d, gamma: g, theta: th };
       }
 
+      // Bracket dx so f(lo) and f(hi) straddle target
       let lo = -200, hi = 200;
       function f(x) { return simulate(x).price - targetPrice; }
 
@@ -139,13 +143,16 @@
       }
       if (flo * fhi > 0) return null;
 
+      // Binary search
       for (let i = 0; i < 60; i++) {
         const mid = (lo + hi) / 2;
         const fmid = f(mid);
+
         if (Math.abs(fmid) < 1e-6) {
           const res = simulate(mid);
           return { move: mid, ...res };
         }
+
         if (flo * fmid <= 0) { hi = mid; fhi = fmid; }
         else { lo = mid; flo = fmid; }
       }
@@ -154,6 +161,7 @@
       return { move: finalMove, ...simulate(finalMove) };
     }
 
+    // Frozen-Greeks minimum reachable price (convex limit) for gamma>0
     function frozenGreeksMin(optionPrice, delta, gamma, theta, timeDays) {
       const a = 0.5 * gamma;
       if (Math.abs(a) < 1e-12) return null;
@@ -163,13 +171,19 @@
       return { dxStar, minPrice: optionPrice + minChange };
     }
 
+    // Frozen-Greeks quadratic solve
     function requiredStockMove({ optionPrice, targetPrice, delta, gamma, theta, timeDays }) {
       const dC = targetPrice - optionPrice;
+
       const a = 0.5 * gamma;
       const b = delta;
       const c = theta * timeDays - dC;
 
-      if (Math.abs(a) < 1e-12) return Math.abs(b) < 1e-12 ? null : -c / b;
+      // Linear fallback if gamma ~ 0
+      if (Math.abs(a) < 1e-12) {
+        if (Math.abs(b) < 1e-12) return null;
+        return -c / b;
+      }
 
       const disc = b * b - 4 * a * c;
       if (disc < 0) return null;
@@ -184,58 +198,66 @@
     const output = document.getElementById('output');
 
     calcBtn.onclick = () => {
-      const underlying  = parseFloat(underlying.value);
-      const optionPrice = parseFloat(optionPrice.value);
-      const targetPrice = parseFloat(targetPrice.value);
-      const deltaVal    = parseFloat(delta.value);
-      const gammaVal    = parseFloat(gamma.value);
-      const thetaVal    = parseFloat(theta.value);
-      const timeDays    = parseFloat(timeHorizon.value);
+      const underlyingVal  = parseFloat(document.getElementById('underlying').value);
+      const optionPriceVal = parseFloat(document.getElementById('optionPrice').value);
+      const targetPriceVal = parseFloat(document.getElementById('targetPrice').value);
+      const deltaVal       = parseFloat(document.getElementById('delta').value);
+      const gammaVal       = parseFloat(document.getElementById('gamma').value);
+      const thetaVal       = parseFloat(document.getElementById('theta').value);
+      const timeDaysVal    = parseFloat(document.getElementById('timeHorizon').value);
 
-      if ([underlying, optionPrice, targetPrice, deltaVal, gammaVal, thetaVal, timeDays].some(isNaN)) {
+      if ([underlyingVal, optionPriceVal, targetPriceVal, deltaVal, gammaVal, thetaVal, timeDaysVal].some(isNaN)) {
         output.textContent = "Please fill in all fields.";
         return;
       }
 
       const move = requiredStockMove({
-        optionPrice,
-        targetPrice,
+        optionPrice: optionPriceVal,
+        targetPrice: targetPriceVal,
         delta: deltaVal,
         gamma: gammaVal,
         theta: thetaVal,
-        timeDays
+        timeDays: timeDaysVal
       });
 
+      // If frozen-greeks fails, use drift estimate
       if (move === null) {
         const est = solveMoveWithGreekDrift({
-          optionPrice,
-          targetPrice,
+          optionPrice: optionPriceVal,
+          targetPrice: targetPriceVal,
           delta0: deltaVal,
           gamma0: gammaVal,
           theta0: thetaVal,
-          timeDays
+          timeDays: timeDaysVal
         });
 
         if (!est) {
-          const lim = frozenGreeksMin(optionPrice, deltaVal, gammaVal, thetaVal, timeDays);
+          const lim = frozenGreeksMin(optionPriceVal, deltaVal, gammaVal, thetaVal, timeDaysVal);
           output.textContent = lim
-            ? `Closest estimate:\nUnderlying ≈ ${(underlying + lim.dxStar).toFixed(2)}\nOption ≈ ${lim.minPrice.toFixed(2)}`
+            ? `Closest estimate:\nUnderlying ≈ ${(underlyingVal + lim.dxStar).toFixed(2)}\nOption ≈ ${lim.minPrice.toFixed(2)}`
             : "No estimate available.";
           return;
         }
 
         output.textContent =
-          `Estimated underlying price: ${(underlying + est.move).toFixed(2)}\n\n` +
+          `Estimated underlying price: ${(underlyingVal + est.move).toFixed(2)}\n` +
+          `Estimated underlying move: ${est.move.toFixed(2)}\n\n` +
           `Estimated Greeks:\n` +
           `• Delta ≈ ${est.delta.toFixed(4)}\n` +
           `• Gamma ≈ ${est.gamma.toFixed(6)}\n` +
-          `• Theta/day ≈ ${est.theta.toFixed(4)}`;
+          `• Theta/day ≈ ${est.theta.toFixed(4)}\n\n` +
+          `Note: Estimated (IV not modeled).`;
         return;
       }
 
+      // Frozen-greeks success path
       output.textContent =
         `Required underlying move: ${move.toFixed(2)}\n` +
-        `Target underlying price: ${(underlying + move).toFixed(2)}`;
+        `Target underlying price: ${(underlyingVal + move).toFixed(2)}\n\n` +
+        `Assumptions:\n` +
+        `• IV flat\n` +
+        `• Greeks locally valid\n` +
+        `• Small–moderate move only`;
     };
   </script>
 </body>
