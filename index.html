@@ -7,9 +7,9 @@
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
-  <h1>Option → Stock Move Calculator</h1>
+  <h1>My Quant's Option Calculator</h1>
 
-    <label>Underlying Price (SPY)
+    <label>Underlying Price
       <input id="underlying" type="number" step="0.01">
     </label>
 
@@ -38,11 +38,14 @@
     </label>
 
     <label>Time Horizon
-      <select id="timeHorizon">
-        <option value="0">Now</option>
-        <option value="1">Tomorrow Close (1 day)</option>
-        <option value="0.5">~Half Day</option>
-      </select>
+<select id="timeHorizon">
+  <option value="0">Now</option>
+  <option value="1">1 day</option>
+  <option value="2">2 days</option>
+  <option value="3">3 days</option>
+  <option value="4">4 days</option>
+  <option value="5">5 days</option>
+</select>
     </label>
 
     <button id="calculate">Calculate Required Move</button>
