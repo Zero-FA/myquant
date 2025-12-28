@@ -32,8 +32,19 @@ calcBtn.onclick = () => {
   });
 
   if (move === null) {
-    output.textContent = "No real solution — check inputs (theta must be negative).";
-    return;
+    const dC = targetPrice - optionPrice;
+const a = 0.5 * gamma;
+const b = delta;
+const c = theta * timeDays - dC;
+const discriminant = b * b - 4 * a * c;
+
+output.textContent =
+  "No real solution.\n" +
+  `discriminant=${discriminant}\n` +
+  `a=${a}, b=${b}, c=${c}\n` +
+  `dC=${dC}, timeDays=${timeDays}\n` +
+  "Check inputs/units.";
+return;
   }
 
   const targetStock = underlying + move;
