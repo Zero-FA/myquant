@@ -154,26 +154,75 @@
         timeDays
       });
 
-      if (move === null) {
-        // Helpful debug + truthful message
-        const dC = targetPrice - optionPrice;
-        const a = 0.5 * gamma;
-        const b = delta;
-        const c = theta * timeDays - dC;
-        const discriminant = b * b - 4 * a * c;
+if (move === null) {
+  const dC = targetPrice - optionPrice;
+  const a = 0.5 * gamma;
+  const b = delta;
 
-        output.textContent =
-          "No real solution.\n" +
-          `discriminant=${discriminant}\n` +
-          `a=${a}, b=${b}, c=${c}\n` +
-          `dC=${dC}, timeDays=${timeDays}\n\n` +
-          "Try:\n" +
-          "• increasing time horizon (theta decay)\n" +
-          "• using updated delta/gamma\n" +
-          "• smaller target change\n" +
-          "• or note IV changes aren't modeled.";
-        return;
-      }
+  // Under frozen greeks, change is: dC(x) = b*x + a*x^2 + theta*timeDays
+  // If a>0 (normal), the MOST negative change happens at x* = -b/(2a)
+  let minChange = null;
+  let minAtMove = null;
+  let minReachablePrice = null;
+
+  if (Math.abs(a) > 1e-12) {
+    minAtMove = -b / (2 * a);
+    minChange = (b * minAtMove) + (a * minAtMove * minAtMove) + (theta * timeDays);
+    minReachablePrice = optionPrice + minChange;
+  }
+
+  // How far beyond the frozen-greeks minimum are you asking?
+  const extraBeyondMin =
+    (minChange === null) ? null : (dC - minChange); // negative = asking for more drop than possible
+
+  // Rough constraints for "greeks must change":
+  // discriminant = b^2 - 4*a*(theta*timeDays - dC) must be >= 0
+  // With a=0.5*gamma -> discriminant = b^2 - 2*gamma*(theta*timeDays - dC)
+  const need = (theta * timeDays - dC); // if >0, you're demanding too much drop for given delta/gamma
+  let gammaMax = null;
+  if (need > 0) gammaMax = (b * b) / (2 * need);
+
+  let deltaMinAbs = null;
+  if (need > 0 && gamma > 0) deltaMinAbs = Math.sqrt(2 * gamma * need);
+
+  let msg =
+    "No real solution under *frozen* Greeks (delta/gamma/theta held constant).\n\n" +
+    `Inputs imply dC = target - current = ${dC.toFixed(4)}\n` +
+    `TimeDays=${timeDays}\n\n`;
+
+  if (minReachablePrice !== null && isFinite(minReachablePrice)) {
+    msg +=
+      "Frozen-Greeks limit (with your delta & gamma):\n" +
+      `• Lowest reachable option price ≈ ${minReachablePrice.toFixed(4)}\n` +
+      `• This occurs around underlying move ≈ ${minAtMove.toFixed(2)}\n\n`;
+
+    if (extraBeyondMin !== null && extraBeyondMin < 0) {
+      msg +=
+        "Your target is beyond that limit by:\n" +
+        `• ${Math.abs(extraBeyondMin).toFixed(4)} option-price points\n\n`;
+    }
+  }
+
+  msg +=
+    "So yes, the market can still do it — but ONLY if Greeks/IV change as price moves.\n\n" +
+    "Rough 'Greeks must change' constraints (holding the others fixed):\n";
+
+  if (gammaMax !== null && isFinite(gammaMax)) {
+    msg += `• To have ANY real solution with this delta, gamma would need to be ≤ ${gammaMax.toFixed(6)}\n`;
+  } else {
+    msg += "• (Not in a 'too-much-drop' regime for the gamma constraint)\n";
+  }
+
+  if (deltaMinAbs !== null && isFinite(deltaMinAbs)) {
+    msg += `• Or with this gamma, |delta| would need to be ≥ ${deltaMinAbs.toFixed(6)}\n`;
+  }
+
+  msg +=
+    "\nTip: pick 1 day+ (theta applies), or understand 0DTE intraday Greeks shift fast.";
+
+  output.textContent = msg;
+  return;
+}
 
       const targetStock = underlying + move;
 
