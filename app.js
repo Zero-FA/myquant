@@ -8,10 +8,21 @@ runOCRBtn.onclick = async () => {
 
   const data = await runOCRFromImage(imageInput.files[0]);
 
-  if (data.underlying) document.getElementById('underlying').value = data.underlying;
-  if (data.delta) document.getElementById('delta').value = data.delta;
-  if (data.gamma) document.getElementById('gamma').value = data.gamma;
-  if (data.theta) document.getElementById('theta').value = data.theta;
+  // DEBUG: show what OCR extracted
+  console.log("OCR result object:", data);
+  console.log("OCR rawNumbers:", data.rawNumbers);
+
+  alert(
+    "OCR extracted:\n" +
+    "Underlying: " + (data.underlying ?? "null") + "\n" +
+    "rawNumbers: " + (data.rawNumbers ? data.rawNumbers.join(", ") : "none")
+  );
+
+  // Fill fields if present (you can still overwrite manually)
+  if (data.underlying != null) document.getElementById('underlying').value = data.underlying;
+  if (data.delta != null) document.getElementById('delta').value = data.delta;
+  if (data.gamma != null) document.getElementById('gamma').value = data.gamma;
+  if (data.theta != null) document.getElementById('theta').value = data.theta;
 };
 
 calcBtn.onclick = () => {
