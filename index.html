@@ -40,11 +40,6 @@
       font-size: 1.1em;
       white-space: pre-line;
     }
-    .hint {
-      font-size: 0.9em;
-      color: #94a3b8;
-      margin-top: 4px;
-    }
   </style>
 </head>
 <body>
@@ -69,16 +64,6 @@
 
     <label>Theta (per day)
       <input id="theta" type="number" step="0.0001" />
-    </label>
-
-    <label>Vega (per +1.00 IV point)
-      <input id="vega" type="number" step="0.0001" value="0" />
-      <div class="hint">Example: if IV +1.0 (one vol point) adds ~$0.08 to the option, vega = 0.08</div>
-    </label>
-
-    <label>Expected IV Change over horizon (IV points)
-      <input id="dIv" type="number" step="0.01" value="0" />
-      <div class="hint">Example: IV goes 18.5 → 20.0, ΔIV = +1.5</div>
     </label>
   </div>
 
@@ -111,15 +96,12 @@
     }
 
     // Estimate-only solver that lets Greeks drift as price moves.
-    // Adds a simple IV term: vega * dIV (user-supplied), applied evenly over steps.
     function solveMoveWithGreekDrift({
       optionPrice,
       targetPrice,
       delta0,
       gamma0,
       theta0,
-      vega0,
-      dIvTotal,
       timeDays
     }) {
       const steps = 80;
@@ -132,34 +114,21 @@
         let g = gamma0;
         let th = theta0;
 
-        // Keep vega simple but not insane: scale with sqrt(time remaining proxy)
-        // If you want "pure constant vega", replace this with: let v = vega0;
-        let v = vega0;
-
         const step = dx / steps;
         const dt = timeDays / steps;
-        const dIvStep = dIvTotal / steps;
 
         for (let i = 0; i < steps; i++) {
-          // Price change: delta/gamma/theta + vega*dIV
-          price += d * step + 0.5 * g * step * step + th * dt + v * dIvStep;
+          price += d * step + 0.5 * g * step * step + th * dt;
 
-          // Delta drift from gamma
           d = clamp(d + g * step, -1, 1);
 
-          // Gamma shape drift (your heuristic)
           const shape = Math.max(0.01, Math.abs(d) * (1 - Math.abs(d)));
           g = Math.max(gammaFloor, gamma0 * (shape / baseShape));
 
-          // Theta drift heuristic (your existing choice)
           th = theta0 * (g / gamma0);
-
-          // Optional: vega drift (very rough). Comment out if you want constant vega.
-          // Vega tends to be highest near ATM; we loosely tie it to the same shape factor:
-          v = vega0 * (shape / baseShape);
         }
 
-        return { price, delta: d, gamma: g, theta: th, vega: v };
+        return { price, delta: d, gamma: g, theta: th };
       }
 
       // Bracket dx so f(lo) and f(hi) straddle target
@@ -193,24 +162,22 @@
     }
 
     // Frozen-Greeks minimum reachable price (convex limit) for gamma>0
-    function frozenGreeksMin(optionPrice, delta, gamma, theta, vega, dIv, timeDays) {
+    function frozenGreeksMin(optionPrice, delta, gamma, theta, timeDays) {
       const a = 0.5 * gamma;
       if (Math.abs(a) < 1e-12) return null;
 
       const dxStar = -delta / (2 * a);
-      const minChange = delta * dxStar + a * dxStar * dxStar + theta * timeDays + vega * dIv;
+      const minChange = delta * dxStar + a * dxStar * dxStar + theta * timeDays;
       return { dxStar, minPrice: optionPrice + minChange };
     }
 
-    // Frozen-Greeks quadratic solve with IV term
-    function requiredStockMove({ optionPrice, targetPrice, delta, gamma, theta, vega, dIv, timeDays }) {
+    // Frozen-Greeks quadratic solve
+    function requiredStockMove({ optionPrice, targetPrice, delta, gamma, theta, timeDays }) {
       const dC = targetPrice - optionPrice;
 
       const a = 0.5 * gamma;
       const b = delta;
-
-      // delta*dx + 0.5*gamma*dx^2 + theta*t + vega*dIV = dC
-      const c = theta * timeDays + vega * dIv - dC;
+      const c = theta * timeDays - dC;
 
       // Linear fallback if gamma ~ 0
       if (Math.abs(a) < 1e-12) {
@@ -237,11 +204,9 @@
       const deltaVal       = parseFloat(document.getElementById('delta').value);
       const gammaVal       = parseFloat(document.getElementById('gamma').value);
       const thetaVal       = parseFloat(document.getElementById('theta').value);
-      const vegaVal        = parseFloat(document.getElementById('vega').value);
-      const dIvVal         = parseFloat(document.getElementById('dIv').value);
       const timeDaysVal    = parseFloat(document.getElementById('timeHorizon').value);
 
-      if ([underlyingVal, optionPriceVal, targetPriceVal, deltaVal, gammaVal, thetaVal, vegaVal, dIvVal, timeDaysVal].some(isNaN)) {
+      if ([underlyingVal, optionPriceVal, targetPriceVal, deltaVal, gammaVal, thetaVal, timeDaysVal].some(isNaN)) {
         output.textContent = "Please fill in all fields.";
         return;
       }
@@ -252,8 +217,6 @@
         delta: deltaVal,
         gamma: gammaVal,
         theta: thetaVal,
-        vega: vegaVal,
-        dIv: dIvVal,
         timeDays: timeDaysVal
       });
 
@@ -265,13 +228,11 @@
           delta0: deltaVal,
           gamma0: gammaVal,
           theta0: thetaVal,
-          vega0: vegaVal,
-          dIvTotal: dIvVal,
           timeDays: timeDaysVal
         });
 
         if (!est) {
-          const lim = frozenGreeksMin(optionPriceVal, deltaVal, gammaVal, thetaVal, vegaVal, dIvVal, timeDaysVal);
+          const lim = frozenGreeksMin(optionPriceVal, deltaVal, gammaVal, thetaVal, timeDaysVal);
           output.textContent = lim
             ? `Closest estimate:\nUnderlying ≈ ${(underlyingVal + lim.dxStar).toFixed(2)}\nOption ≈ ${lim.minPrice.toFixed(2)}`
             : "No estimate available.";
@@ -284,11 +245,8 @@
           `Estimated Greeks:\n` +
           `• Delta ≈ ${est.delta.toFixed(4)}\n` +
           `• Gamma ≈ ${est.gamma.toFixed(6)}\n` +
-          `• Theta/day ≈ ${est.theta.toFixed(4)}\n` +
-          `• Vega/IV-pt ≈ ${est.vega.toFixed(4)}\n\n` +
-          `IV assumption:\n` +
-          `• ΔIV over horizon = ${dIvVal.toFixed(2)}\n\n` +
-          `Note: Still an estimate (skew/vol surface not modeled).`;
+          `• Theta/day ≈ ${est.theta.toFixed(4)}\n\n` +
+          `Note: Estimated (IV not modeled).`;
         return;
       }
 
@@ -296,13 +254,10 @@
       output.textContent =
         `Required underlying move: ${move.toFixed(2)}\n` +
         `Target underlying price: ${(underlyingVal + move).toFixed(2)}\n\n` +
-        `Included:\n` +
-        `• Theta over ${timeDaysVal} day(s)\n` +
-        `• Vega × ΔIV (${vegaVal.toFixed(4)} × ${dIvVal.toFixed(2)})\n\n` +
         `Assumptions:\n` +
+        `• IV flat\n` +
         `• Greeks locally valid\n` +
-        `• ΔIV is your manual input\n` +
-        `• Best for small–moderate moves`;
+        `• Small–moderate move only`;
     };
   </script>
 </body>
