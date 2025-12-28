@@ -97,6 +97,106 @@
   <div class="box" id="output"></div>
 
   <script>
+    function clamp(x, lo, hi) {
+  return Math.max(lo, Math.min(hi, x));
+}
+
+// Heuristic "greeks drift" simulator + binary search to hit targetPrice.
+// Not a real pricing model — just a practical estimate.
+function solveMoveWithGreekDrift({
+  optionPrice,
+  targetPrice,
+  underlying,
+  delta0,
+  gamma0,
+  theta0,
+  timeDays
+}) {
+  const steps = 60;
+  const gammaFloor = 1e-6;
+
+  // For scaling gamma as delta collapses: use |delta| in [0,1]
+  const baseShape = Math.max(0.01, Math.abs(delta0) * (1 - Math.abs(delta0)));
+
+  function simulate(dx) {
+    let price = optionPrice;
+    let d = delta0;
+    let g = gamma0;
+    let th = theta0;
+
+    const step = dx / steps;
+    const dt = timeDays / steps;
+
+    for (let i = 0; i < steps; i++) {
+      // Update price using local delta/gamma + theta
+      price += d * step + 0.5 * g * step * step + th * dt;
+
+      // Drift delta by gamma
+      d = d + g * step;
+      d = clamp(d, -1, 1);
+
+      // Decay gamma as option goes more OTM/ITM (shape collapses near |delta|=0 or 1)
+      const shape = Math.max(0.01, Math.abs(d) * (1 - Math.abs(d)));
+      g = gamma0 * (shape / baseShape);
+      g = Math.max(gammaFloor, g);
+
+      // Theta tends to decay as gamma collapses (very rough)
+      th = theta0 * (g / gamma0);
+    }
+
+    return { price, delta: d, gamma: g, theta: th };
+  }
+
+  // Binary search bounds for dx
+  // Start with a reasonable bracket and expand until target is between.
+  let lo = -50, hi = 50;
+
+  const wantUp = targetPrice > optionPrice; // if we need option to rise
+
+  function okBracket(a, b) {
+    // we want f(lo) and f(hi) to straddle target
+    const fa = simulate(a).price - targetPrice;
+    const fb = simulate(b).price - targetPrice;
+    return fa === 0 || fb === 0 || (fa < 0 && fb > 0) || (fa > 0 && fb < 0);
+  }
+
+  // Expand bracket up to a limit
+  let tries = 0;
+  while (!okBracket(lo, hi) && tries < 12) {
+    lo *= 1.6;
+    hi *= 1.6;
+    tries++;
+  }
+
+  if (!okBracket(lo, hi)) {
+    return null; // still couldn't bracket target
+  }
+
+  // Binary search
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    const pmid = simulate(mid).price;
+
+    if (pmid === targetPrice) {
+      const res = simulate(mid);
+      return { move: mid, ...res };
+    }
+
+    // Decide which side keeps the bracket
+    const flo = simulate(lo).price - targetPrice;
+    const fmid = pmid - targetPrice;
+
+    if ((flo < 0 && fmid < 0) || (flo > 0 && fmid > 0)) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+
+  const finalMove = (lo + hi) / 2;
+  const res = simulate(finalMove);
+  return { move: finalMove, ...res };
+}
     function requiredStockMove({ optionPrice, targetPrice, delta, gamma, theta, timeDays }) {
       const dC = targetPrice - optionPrice;
 
@@ -155,72 +255,34 @@
       });
 
 if (move === null) {
-  const dC = targetPrice - optionPrice;
-  const a = 0.5 * gamma;
-  const b = delta;
+  // Try heuristic greeks-drift estimate
+  const est = solveMoveWithGreekDrift({
+    optionPrice,
+    targetPrice,
+    underlying,
+    delta0: delta,
+    gamma0: gamma,
+    theta0: theta,
+    timeDays
+  });
 
-  // Under frozen greeks, change is: dC(x) = b*x + a*x^2 + theta*timeDays
-  // If a>0 (normal), the MOST negative change happens at x* = -b/(2a)
-  let minChange = null;
-  let minAtMove = null;
-  let minReachablePrice = null;
-
-  if (Math.abs(a) > 1e-12) {
-    minAtMove = -b / (2 * a);
-    minChange = (b * minAtMove) + (a * minAtMove * minAtMove) + (theta * timeDays);
-    minReachablePrice = optionPrice + minChange;
+  if (!est) {
+    output.textContent =
+      "No solution found (even with estimated Greeks drift).\n" +
+      "Try a smaller target change, longer time horizon, or updated Greeks.";
+    return;
   }
 
-  // How far beyond the frozen-greeks minimum are you asking?
-  const extraBeyondMin =
-    (minChange === null) ? null : (dC - minChange); // negative = asking for more drop than possible
+  const targetStock = underlying + est.move;
 
-  // Rough constraints for "greeks must change":
-  // discriminant = b^2 - 4*a*(theta*timeDays - dC) must be >= 0
-  // With a=0.5*gamma -> discriminant = b^2 - 2*gamma*(theta*timeDays - dC)
-  const need = (theta * timeDays - dC); // if >0, you're demanding too much drop for given delta/gamma
-  let gammaMax = null;
-  if (need > 0) gammaMax = (b * b) / (2 * need);
-
-  let deltaMinAbs = null;
-  if (need > 0 && gamma > 0) deltaMinAbs = Math.sqrt(2 * gamma * need);
-
-  let msg =
-    "No real solution under *frozen* Greeks (delta/gamma/theta held constant).\n\n" +
-    `Inputs imply dC = target - current = ${dC.toFixed(4)}\n` +
-    `TimeDays=${timeDays}\n\n`;
-
-  if (minReachablePrice !== null && isFinite(minReachablePrice)) {
-    msg +=
-      "Frozen-Greeks limit (with your delta & gamma):\n" +
-      `• Lowest reachable option price ≈ ${minReachablePrice.toFixed(4)}\n` +
-      `• This occurs around underlying move ≈ ${minAtMove.toFixed(2)}\n\n`;
-
-    if (extraBeyondMin !== null && extraBeyondMin < 0) {
-      msg +=
-        "Your target is beyond that limit by:\n" +
-        `• ${Math.abs(extraBeyondMin).toFixed(4)} option-price points\n\n`;
-    }
-  }
-
-  msg +=
-    "So yes, the market can still do it — but ONLY if Greeks/IV change as price moves.\n\n" +
-    "Rough 'Greeks must change' constraints (holding the others fixed):\n";
-
-  if (gammaMax !== null && isFinite(gammaMax)) {
-    msg += `• To have ANY real solution with this delta, gamma would need to be ≤ ${gammaMax.toFixed(6)}\n`;
-  } else {
-    msg += "• (Not in a 'too-much-drop' regime for the gamma constraint)\n";
-  }
-
-  if (deltaMinAbs !== null && isFinite(deltaMinAbs)) {
-    msg += `• Or with this gamma, |delta| would need to be ≥ ${deltaMinAbs.toFixed(6)}\n`;
-  }
-
-  msg +=
-    "\nTip: pick 1 day+ (theta applies), or understand 0DTE intraday Greeks shift fast.";
-
-  output.textContent = msg;
+  output.textContent =
+    `Estimated required underlying price: ${targetStock.toFixed(2)}\n` +
+    `Estimated underlying move: ${est.move.toFixed(2)}\n\n` +
+    `Estimated Greeks at that level:\n` +
+    `• Delta ≈ ${est.delta.toFixed(4)}\n` +
+    `• Gamma ≈ ${est.gamma.toFixed(6)}\n` +
+    `• Theta/day ≈ ${est.theta.toFixed(4)}\n\n` +
+    `Note: Greeks are estimated (IV not modeled).`;
   return;
 }
 
