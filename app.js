@@ -6,23 +6,22 @@ const output = document.getElementById('output');
 runOCRBtn.onclick = async () => {
   if (!imageInput.files.length) return;
 
-  const data = await runOCRFromImage(imageInput.files[0]);
+  const strikeVal = document.getElementById('strike').value;
+  const strike = strikeVal ? parseInt(strikeVal, 10) : null;
 
-  // DEBUG: show what OCR extracted
-  console.log("OCR result object:", data);
-  console.log("OCR rawNumbers:", data.rawNumbers);
-
-  alert(
-    "OCR extracted:\n" +
-    "Underlying: " + (data.underlying ?? "null") + "\n" +
-    "rawNumbers: " + (data.rawNumbers ? data.rawNumbers.join(", ") : "none")
-  );
+  const data = await runOCRFromImage(imageInput.files[0], strike);
 
   // Fill fields if present (you can still overwrite manually)
   if (data.underlying != null) document.getElementById('underlying').value = data.underlying;
+  if (data.optionPrice != null) document.getElementById('optionPrice').value = data.optionPrice;
+  if (data.theta != null) document.getElementById('theta').value = data.theta;
   if (data.delta != null) document.getElementById('delta').value = data.delta;
   if (data.gamma != null) document.getElementById('gamma').value = data.gamma;
-  if (data.theta != null) document.getElementById('theta').value = data.theta;
+
+  // If it couldn't find the strike row, show why
+  if (data.rowFound === false) {
+    alert("Could not find the strike row in OCR text. Try a clearer screenshot or zoom in, then retry.");
+  }
 };
 
 calcBtn.onclick = () => {
