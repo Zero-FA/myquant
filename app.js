@@ -39,8 +39,8 @@ calcBtn.onclick = () => {
   const targetStock = underlying + move;
 
   output.textContent =
-    `Required SPY move: ${move.toFixed(2)}\n` +
-    `Target SPY price: ${targetStock.toFixed(2)}\n\n` +
+`Required underlying move: ${move.toFixed(2)}\n` +
+`Target underlying price: ${targetStock.toFixed(2)}\n\n` +
     `Assumptions:\n` +
     `• IV flat\n` +
     `• Greeks locally valid\n` +
