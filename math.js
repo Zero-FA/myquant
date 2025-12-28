@@ -12,8 +12,13 @@ function requiredStockMove({
   const b = delta;
   const c = theta * timeDays - dC;
 
-  const discriminant = b * b - 4 * a * c;
+  // Linear fallback if gamma is ~0
+  if (Math.abs(a) < 1e-12) {
+    if (Math.abs(b) < 1e-12) return null;
+    return -c / b;
+  }
 
+  const discriminant = b * b - 4 * a * c;
   if (discriminant < 0) return null;
 
   const sqrtD = Math.sqrt(discriminant);
@@ -21,6 +26,5 @@ function requiredStockMove({
   const root1 = (-b + sqrtD) / (2 * a);
   const root2 = (-b - sqrtD) / (2 * a);
 
-  // Pick smaller magnitude move (more realistic)
   return Math.abs(root1) < Math.abs(root2) ? root1 : root2;
 }
