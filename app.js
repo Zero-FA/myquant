@@ -1,28 +1,5 @@
-const imageInput = document.getElementById('imageInput');
-const runOCRBtn = document.getElementById('runOCR');
 const calcBtn = document.getElementById('calculate');
 const output = document.getElementById('output');
-
-runOCRBtn.onclick = async () => {
-  if (!imageInput.files.length) return;
-
-  const strikeVal = document.getElementById('strike').value;
-  const strike = strikeVal ? parseInt(strikeVal, 10) : null;
-
-  const data = await runOCRFromImage(imageInput.files[0], strike);
-
-  // Fill fields if present (you can still overwrite manually)
-  if (data.underlying != null) document.getElementById('underlying').value = data.underlying;
-  if (data.optionPrice != null) document.getElementById('optionPrice').value = data.optionPrice;
-  if (data.theta != null) document.getElementById('theta').value = data.theta;
-  if (data.delta != null) document.getElementById('delta').value = data.delta;
-  if (data.gamma != null) document.getElementById('gamma').value = data.gamma;
-
-  // If it couldn't find the strike row, show why
-  if (data.rowFound === false) {
-    alert("Could not find the strike row in OCR text. Try a clearer screenshot or zoom in, then retry.");
-  }
-};
 
 calcBtn.onclick = () => {
   const underlying = parseFloat(document.getElementById('underlying').value);
@@ -32,6 +9,18 @@ calcBtn.onclick = () => {
   const gamma = parseFloat(document.getElementById('gamma').value);
   const theta = parseFloat(document.getElementById('theta').value);
   const timeDays = parseFloat(document.getElementById('timeHorizon').value);
+
+  if (
+    isNaN(underlying) ||
+    isNaN(optionPrice) ||
+    isNaN(targetPrice) ||
+    isNaN(delta) ||
+    isNaN(gamma) ||
+    isNaN(theta)
+  ) {
+    output.textContent = "Please fill in all fields.";
+    return;
+  }
 
   const move = requiredStockMove({
     optionPrice,
@@ -43,7 +32,7 @@ calcBtn.onclick = () => {
   });
 
   if (move === null) {
-    output.textContent = "No real solution — assumptions break down.";
+    output.textContent = "No real solution — check inputs (theta must be negative).";
     return;
   }
 
